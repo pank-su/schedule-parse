@@ -1,12 +1,32 @@
 
 import axios from 'axios';
 import {load} from 'cheerio';
-import Docxtemplater  from "docxtemplater";
 import mammoth = require("mammoth");
 
 
 
 main()
+
+async function parseTeachersFromSUAI() {
+    const url = "https://pro.guap.ru"
+    let response = await axios.get(url + "/professors?position=47&facultyWithChairs=389&subunit=0&fullname=&perPage=100")
+    let $ = load(response.data)
+    const urls = $('#external_professors > div > div.col-lg-9 > div > div > div > div > div > div:nth-child(2) > h5 > a')
+    for (const ur of urls) {
+        const longName = ur.children[0]["data"].trim()
+        console.log(longName)
+        const link_prof = ur.attribs["href"]
+
+        console.log(link_prof)
+        //
+
+    }
+}
+
+function main() {
+    // parseDocxFromVk();
+    parseTeachersFromSUAI()
+}
 
 // Функция для загрузки файла docx по URL
 async function loadDocxFromUrl(url: string): Promise<any> {
@@ -15,6 +35,7 @@ async function loadDocxFromUrl(url: string): Promise<any> {
     });
     return response.data;
 }
+
 interface ScheduleItem {
     time: string;
     monday: string;
@@ -108,7 +129,7 @@ function parseSchedule(data: string): Record<string, ScheduleGroup> {
     return scheduleGroups;
 }
 
-async function main() {
+async function parseDocxFromVk() {
     // Получаем данные из вконтакте о группе
     const groupId = 144922677;
     const myToken = process.env.VK_TOKEN;
@@ -121,7 +142,7 @@ async function main() {
     // Получаем из меню ссылку на расписание
     const urlToDocx = groupMenu["items"].filter(ob => ob.title == "Расписание")[0]["url"] + "&no_preview=1";
     // Преобразование docx to html
-    let htmlRasp = await  mammoth.convertToHtml({buffer: (await loadDocxFromUrl(urlToDocx))})
+    let htmlRasp = await mammoth.convertToHtml({buffer: (await loadDocxFromUrl(urlToDocx))})
 
     const schedules = parseSchedule(htmlRasp.value);
 

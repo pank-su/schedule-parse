@@ -12,6 +12,7 @@
   "dependencies": {
     "axios": "^1.4.0",
     "cheerio": "^1.0.0-rc.12",
+    "dataclass": "^2.1.1",
     "docxtemplater": "^3.37.12",
     "mammoth": "^1.6.0",
     "pdfjs-dist": "^3.8.162",
