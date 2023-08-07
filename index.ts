@@ -1,8 +1,13 @@
-
 import axios from 'axios';
 import {load} from 'cheerio';
 import mammoth = require("mammoth");
+import {writeFileSync} from 'fs';
+import {createClient} from '@supabase/supabase-js'
 
+
+const supabaseUrl = 'https://fecnldjxpserceyiifwt.supabase.co'
+const supabaseKey = process.env.SUPABASE_KEY
+const supabase = createClient(supabaseUrl, supabaseKey)
 
 
 main()
@@ -12,20 +17,40 @@ async function parseTeachersFromSUAI() {
     let response = await axios.get(url + "/professors?position=47&facultyWithChairs=389&subunit=0&fullname=&perPage=100")
     let $ = load(response.data)
     const urls = $('#external_professors > div > div.col-lg-9 > div > div > div > div > div > div:nth-child(2) > h5 > a')
+    let id = 1
     for (const ur of urls) {
         const longName = ur.children[0]["data"].trim()
-        console.log(longName)
         const link_prof = ur.attribs["href"]
 
-        console.log(link_prof)
-        //
+        response = await axios.get(url + link_prof)
 
+        let $ = load(response.data)
+        const data = $('.list-group-item h5:contains(\'Email\') + div.small')
+        let email = ''
+        try {
+            email = data.get()[0].children[0]["data"]
+        } catch (e) {
+
+        }
+        let image_path = ''
+        $('.profile_image').each((index, path) => {
+            image_path = path.attribs['src']
+        })
+       await supabase.from('teacher').insert({
+            id: id++,
+            last_name: longName.split(' ')[0],
+            first_name: longName.split(' ')[1],
+            second_name: longName.split(' ')[2],
+            email: email == '' ? null : email,
+            photo: url + image_path
+        })
     }
 }
 
 function main() {
-    // parseDocxFromVk();
     parseTeachersFromSUAI()
+    // parseDocxFromVk();
+
 }
 
 // Функция для загрузки файла docx по URL
@@ -144,9 +169,11 @@ async function parseDocxFromVk() {
     // Преобразование docx to html
     let htmlRasp = await mammoth.convertToHtml({buffer: (await loadDocxFromUrl(urlToDocx))})
 
+    writeFileSync('shedule.html', htmlRasp.value)
+
     const schedules = parseSchedule(htmlRasp.value);
 
-// Обход расписаний для каждой группы
+    // Обход расписаний для каждой группы
     for (const groupName in schedules) {
         if (schedules.hasOwnProperty(groupName)) {
             console.log(`Расписание для группы ${groupName}:`);
