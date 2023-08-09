@@ -36,7 +36,7 @@ async function parseTeachersFromSUAI() {
         $('.profile_image').each((index, path) => {
             image_path = path.attribs['src']
         })
-       await supabase.from('teacher').insert({
+        await supabase.from('teacher').insert({
             id: id++,
             last_name: longName.split(' ')[0],
             first_name: longName.split(' ')[1],
@@ -47,9 +47,14 @@ async function parseTeachersFromSUAI() {
     }
 }
 
-function main() {
-    parseTeachersFromSUAI()
-    // parseDocxFromVk();
+async function main() {
+    // Удаление существующих данных
+    await supabase.from('teacher').delete().neq('last_name', null)
+    await supabase.from('group').delete().neq('group_name', null)
+    await supabase.from('subject').delete().neq('subject_name', null)
+    await parseTeachersFromSUAI()
+    parseDocxFromVk();
+
 
 }
 
@@ -173,14 +178,54 @@ async function parseDocxFromVk() {
 
     const schedules = parseSchedule(htmlRasp.value);
 
+    // indexes
+    let groupDbId = 1
+    let subjectId = 1
     // Обход расписаний для каждой группы
     for (const groupName in schedules) {
         if (schedules.hasOwnProperty(groupName)) {
+            await
+                supabase.from('group').insert({group_id: groupDbId++, group_name: groupName})
             console.log(`Расписание для группы ${groupName}:`);
             console.log('Неделя Числитель:');
-            console.log(schedules[groupName].numerator);
+            let timeIndex = 0
+
+            for (const time of schedules[groupName].numerator) {
+
+
+                for (const [key, value] of Object.entries(time)) {
+                    if (key == 'time' || value == "-------") continue;
+                    let sepCount = 0
+
+                    sepCount += (value.match(/[0-9]{3}|сз[1-4]/g) || []).length
+                    let matched: any;
+                    if (sepCount == 1) {
+                        matched = value.match(/([А-Яa-я\.\,\-\:ё 0-9()]+) ([А-Я][a-я]+\s[А-Я]\.[А-Я]\.) (ауд\.)([0-9]{3},[0-9]{3}|[0-9]{3}|сз[1-4]|)/)
+
+                    } else if (sepCount == 0) {
+                        matched = value.match(/([А-Яa-я\.\,\-\:ё 0-9()]+) ([А-Я][a-я]+\s[А-Я]\.[А-Я]\.)/)
+                    } else {
+                        const authorRegExp = "([А-Я][a-я]+\\s[А-Я]\\.[А-Я]\\.)"
+                        const cabRegExp = "([0-9]{3})"
+                        const newRegExp = `([А-Яa-я\\.\\,\\-\\:ё 0-9()]+) (${Array(sepCount).fill(authorRegExp).join(' ')}) (ауд\\.)(${Array(sepCount).fill(cabRegExp).join(',')})`
+                        matched = value.match(newRegExp)
+                    }
+
+                    const {data} = await supabase.from('subject').select('id').eq('subject_name', matched[1])
+                    let subjectIdForSchedule:number;
+                    if (data.length == 0) {
+                        await  supabase.from('subject').insert({id: subjectId++, subject_name: matched[1]})
+                        subjectIdForSchedule = subjectId - 1
+                    }else {
+                        subjectIdForSchedule = data['id']
+                    }
+                    console.log(matched)
+
+                    //console.log(value)
+                    // console.log(sepCount)
+                }
+            }
             console.log('Неделя Знаменатель:');
-            console.log(schedules[groupName].denominator);
         }
     }
     // console.log(parseSchedule(htmlRasp.value))
