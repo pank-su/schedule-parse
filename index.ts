@@ -256,7 +256,8 @@ async function parseDocxFromVk() {
                         cabinets.push(matched[i])
                     }
 
-                    for (let i = 2; i < 2 + sepCount; i++) {
+                    for (let i = 2 + (sepCount > 1 ? 1 : 0); i < 2 + sepCount + (sepCount > 1 ? 1 : 0); i++) {
+                        console.log(matched[i])
                         const response = await supabase.rpc('find_teacher', {inicials: matched[i]})
                         const {error} = await supabase.from('schedule_teacher_cabinet').insert({
                             schedule_id: curId - 1,
