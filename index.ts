@@ -9,8 +9,20 @@ const supabaseUrl = 'https://fecnldjxpserceyiifwt.supabase.co'
 const supabaseKey = process.env.SUPABASE_KEY
 const supabase = createClient(supabaseUrl, supabaseKey)
 
+console.log(supabase.schema('public'))
 
-main()
+test()
+
+
+async function test(){
+    let { data, error } = await supabase.from('group').select()
+
+    if (error) console.error(error)
+    else console.log(data)
+
+}
+
+//main()
 
 async function parseTeachersFromSUAI() {
     const url = "https://pro.guap.ru"
@@ -173,7 +185,8 @@ async function parseAndAddToTables(schedule: ScheduleItem[], groupDbId: number, 
         let dayId = 0;
         for (const [key, value] of Object.entries(time)) {
             // Урока нет по расписанию
-            if (key == 'time' || value == "-------") continue;
+            if (key == 'time' || value == "-------") {dayId++;continue;
+            }
             let sepCount = 0
 
             // Количкство кабинетов
