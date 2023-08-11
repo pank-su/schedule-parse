@@ -50,7 +50,7 @@ async function parseTeachersFromSUAI() {
 async function main() {
     // Удаление существующих данных
     await supabase.from('cabinet').delete().neq('cabinet_number', null)
-    await supabase.from('schedule_teacher_cabinet').delete().neq('cabinet_number', null)
+    await supabase.from('schedule_teacher_cabinet').delete().neq('schedule_id', -1)
     await supabase.from('schedule').delete().neq('group_id', -1)
     await supabase.from('teacher').delete().neq('last_name', null)
     await supabase.from('group').delete().neq('group_name', null)
@@ -160,6 +160,95 @@ function parseSchedule(data: string): Record<string, ScheduleGroup> {
     return scheduleGroups;
 }
 
+var subjectId = 1
+var curId = 1
+
+/// Дополучение данных из записей в расписание и добавление в нужные таблицы
+async function parseAndAddToTables(schedule: ScheduleItem[], groupDbId: number, isNumerator: boolean) {
+    // предмет по расписанию
+    let timeId = 0
+    for (const time of schedule) {
+        timeId++;
+        // День недели
+        let dayId = 0;
+        for (const [key, value] of Object.entries(time)) {
+            // Урока нет по расписанию
+            if (key == 'time' || value == "-------") continue;
+            let sepCount = 0
+
+            // Количкство кабинетов
+            sepCount += (value.match(/[0-9]{3}|сз[1-4]/g) || []).length
+            // Получение всей информации с предмета (название, преподователь, кабинет)
+            let matched: any;
+            // Если кабинет один, то обрабатываем обычным паттерном
+            if (sepCount == 1) {
+                matched = value.match(/([А-Яa-я\.\,\-\:ё 0-9()]+) ([А-Я][a-я]+\s[А-Я]\.[А-Я]\.) (ауд\.)([0-9]{3},[0-9]{3}|[0-9]{3}|сз[1-4]|)/)
+
+            } else if (sepCount == 0) {
+                // без получения кабинета
+                matched = value.match(/([А-Яa-я\.\,\-\:ё 0-9()]+) ([А-Я][a-я]+\s[А-Я]\.[А-Я]\.)/)
+            } else {
+                // Если несколько, то добавляем нужное количество патернов
+                const authorRegExp = "([А-Я][a-я]+\\s[А-Я]\\.[А-Я]\\.)"
+                const cabRegExp = "([0-9]{3})"
+                const newRegExp = `([А-Яa-я\\.\\,\\-\\:ё 0-9()]+) (${Array(sepCount).fill(authorRegExp).join(' ')}) (ауд\\.)(${Array(sepCount).fill(cabRegExp).join(',')})`
+                matched = value.match(newRegExp)
+            }
+            // Проверяем есть ли предмет в базе
+            const {data} = await supabase.from('subject').select('id').eq('subject_name', matched[1])
+            let subjectIdForSchedule: number;
+            // Если предмета нет в базе, то добавляем
+            if (data.length == 0) {
+                await supabase.from('subject').insert({id: subjectId++, subject_name: matched[1]})
+                subjectIdForSchedule = subjectId - 1
+            } else {
+                subjectIdForSchedule = data[0].id
+            }
+            // Добавляем в расписание
+            await supabase.from('schedule').insert({
+                id: curId++, // Id
+                group_id: groupDbId - 1, // id группы
+                subject_id: subjectIdForSchedule, // id предмета
+                time_id: timeId, // номер предмета по расписанию
+                is_numerator: isNumerator, // это числитель?
+                day_id: dayId++ // день недели
+            })
+            // Если нет кабинета, то добавляем без кабинета
+            if (sepCount == 0) {
+                const response = await supabase.rpc('find_teacher', {inicials: matched[2]})
+                await supabase.from('schedule_teacher_cabinet').insert({
+                    schedule_id: curId,
+                    teacher_id: response.data,
+                    cabinet_number: null
+                })
+                continue
+            }
+            // Получение и добавление кабинетов в таблицу cabinet
+            const cabinets: string[] = []
+            for (let i = matched.length - 1; i >= matched.length - (sepCount); i--) {
+                await supabase.from('cabinet').insert({
+                    cabinet_number: matched[i],
+                    floor: matched[i].startsWith('сз') ? null : Number(matched[i][0]),
+                    info: matched[i].startsWith('сз') ? 'Спортивный зал' : null
+                })
+                cabinets.push(matched[i])
+            }
+            // Добавление информации о записи в расписании (преподаватель и кабинет)
+            let cabId = 0
+            for (let i = 2 + (sepCount > 1 ? 1 : 0); i < 2 + sepCount + (sepCount > 1 ? 1 : 0); i++) {
+                const response = await supabase.rpc('find_teacher', {inicials: matched[i]})
+                const {error} = await supabase.from('schedule_teacher_cabinet').insert({
+                    schedule_id: curId - 1,
+                    teacher_id: response.data,
+                    cabinet_number: cabinets[cabId++]
+                })
+                console.log(error)
+            }
+
+        }
+    }
+}
+
 async function parseDocxFromVk() {
     // Получаем данные из вконтакте о группе
     const groupId = 144922677;
@@ -181,95 +270,15 @@ async function parseDocxFromVk() {
 
     // indexes
     let groupDbId = 1
-    let subjectId = 1
-    let curId = 1
+
     // Обход расписаний для каждой группы
     for (const groupName in schedules) {
         if (schedules.hasOwnProperty(groupName)) {
             // Добавление группы
             await
                 supabase.from('group').insert({group_id: groupDbId++, group_name: groupName})
-            console.log(`Расписание для группы ${groupName}:`);
-            console.log('Неделя Числитель:');
-
-
-            // предмет по расписанию
-            let timeIndex = 0
-
-            for (const time of schedules[groupName].numerator) {
-                timeIndex++;
-                for (const [key, value] of Object.entries(time)) {
-                    // Урока нет по расписанию
-                    if (key == 'time' || value == "-------") continue;
-                    let sepCount = 0
-
-                    // Количкство кабинетов
-                    sepCount += (value.match(/[0-9]{3}|сз[1-4]/g) || []).length
-                    // Получение всей информации с предмета (название, преподователь, кабинет)
-                    let matched: any;
-                    // Если кабинет один, то обрабатываем обычным паттерном
-                    if (sepCount == 1) {
-                        matched = value.match(/([А-Яa-я\.\,\-\:ё 0-9()]+) ([А-Я][a-я]+\s[А-Я]\.[А-Я]\.) (ауд\.)([0-9]{3},[0-9]{3}|[0-9]{3}|сз[1-4]|)/)
-
-                    } else if (sepCount == 0) {
-                        // без получения кабинета
-                        matched = value.match(/([А-Яa-я\.\,\-\:ё 0-9()]+) ([А-Я][a-я]+\s[А-Я]\.[А-Я]\.)/)
-                    } else {
-                        // Если несколько, то добавляем нужное количество патернов
-                        const authorRegExp = "([А-Я][a-я]+\\s[А-Я]\\.[А-Я]\\.)"
-                        const cabRegExp = "([0-9]{3})"
-                        const newRegExp = `([А-Яa-я\\.\\,\\-\\:ё 0-9()]+) (${Array(sepCount).fill(authorRegExp).join(' ')}) (ауд\\.)(${Array(sepCount).fill(cabRegExp).join(',')})`
-                        matched = value.match(newRegExp)
-                    }
-                    // Проверяем есть ли предмет в базе
-                    const {data} = await supabase.from('subject').select('id').eq('subject_name', matched[1])
-                    let subjectIdForSchedule: number;
-                    // Если предмета нет в базе, то добавляем
-                    if (data.length == 0) {
-                        await supabase.from('subject').insert({id: subjectId++, subject_name: matched[1]})
-                        subjectIdForSchedule = subjectId - 1
-                    } else {
-                        subjectIdForSchedule = data[0].id
-                    }
-                    // Добавляем в расписание
-                    await supabase.from('schedule').insert({
-                        id: curId++,
-                        group_id: groupDbId - 1,
-                        subject_id: subjectIdForSchedule,
-                        time_id: timeIndex,
-                        is_numerator: true
-                    })
-                    if (sepCount == 0) {
-                        const response = await supabase.rpc('find_teacher', {inicials: matched[2]})
-                        await supabase.from('schedule_teacher_cabinet').insert({
-                            schedule_id: curId,
-                            teacher_id: response.data,
-                            cabinet_number: null
-                        })
-                    }
-                    const cabinets: string[] = []
-                    for (let i = matched.length - 1; i >= matched.length - (sepCount); i--) {
-                        await supabase.from('cabinet').insert({
-                            cabinet_number: matched[i],
-                            floor: matched[i].startsWith('сз') ? null : Number(matched[i][0])
-                        })
-                        cabinets.push(matched[i])
-                    }
-
-                    for (let i = 2 + (sepCount > 1 ? 1 : 0); i < 2 + sepCount + (sepCount > 1 ? 1 : 0); i++) {
-                        console.log(matched[i])
-                        const response = await supabase.rpc('find_teacher', {inicials: matched[i]})
-                        const {error} = await supabase.from('schedule_teacher_cabinet').insert({
-                            schedule_id: curId - 1,
-                            teacher_id: response.data,
-                            cabinet_number: cabinets[i - 2]
-                        })
-                        console.log(error)
-                    }
-                }
-            }
-            console.log('Неделя Знаменатель:');
-            // TODO Доделать знаменатель
+            await parseAndAddToTables(schedules[groupName].numerator,  groupDbId, true);
+            await parseAndAddToTables(schedules[groupName].denominator, groupDbId, false);
         }
     }
     // console.log(parseSchedule(htmlRasp.value))
