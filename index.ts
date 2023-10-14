@@ -225,7 +225,7 @@ async function parseLessonElement(lessonElement: Element, timeRange: RegExpMatch
         let request = (await supabase.from('schedule').insert({
             group_id: groupDbId_, // id группы
             subject_id: subjectIdForSchedule, // id предмета
-            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
+            time_str: `${timeRange[1]} - ${timeRange[2]}`, // номер предмета по расписанию
             is_numerator: false, // это числитель?
             day_id: dayIdFromName(dayName) // день недели
         }).select("id").single())
@@ -236,7 +236,7 @@ async function parseLessonElement(lessonElement: Element, timeRange: RegExpMatch
         id = (await supabase.from('schedule').insert({
             group_id: groupDbId_, // id группы
             subject_id: subjectIdForSchedule, // id предмета
-            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
+            time_str: `${timeRange[1]} - ${timeRange[2]}`, // номер предмета по расписанию
             is_numerator: true, // это числитель?
             day_id: dayIdFromName(dayName) // день недели
         }).select("id").single()).data.id
@@ -245,7 +245,7 @@ async function parseLessonElement(lessonElement: Element, timeRange: RegExpMatch
         let request = await supabase.from('schedule').insert({
             group_id: groupDbId_, // id группы
             subject_id: subjectIdForSchedule, // id предмета
-            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
+            time_str: `${timeRange[1]} - ${timeRange[2]}`, // номер предмета по расписанию
             is_numerator: isNumerator, // это числитель?
             day_id: dayIdFromName(dayName) // день недели
         }).select("id").single()
