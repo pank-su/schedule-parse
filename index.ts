@@ -33,7 +33,6 @@ async function test() {
 const timeFSPO = ["9:20 - 10:55", "11:05 - 12:40", "13:20 - 14:55", "15:05 - 16:40"]
 
 
-
 //main()
 
 async function parseTeachersFromSUAI() {
@@ -76,14 +75,26 @@ async function main() {
     await supabase.from('cabinet').delete().neq('cabinet_number', null)
     await supabase.from('schedule_teacher_cabinet').delete().neq('schedule_id', -1)
     await supabase.from('schedule').delete().neq('group_id', -1)
-    await supabase.from('teacher').delete().neq('last_name', null)
+    // // await supabase.from('teacher').delete().neq('last_name', null)
     await supabase.from('group').delete().neq('group_name', null)
     await supabase.from('subject').delete().neq('subject_name', null)
     // await parseTeachersFromSUAI()
-
+    //
+    await parseDocxFromVk();
+    //
     await parseBigGuap()
 
-    // parseDocxFromVk();
+    let { data, error } = await supabase
+        .rpc('get_day_schedule', {
+            day_id_:1,
+            group_id_: 1,
+            is_numerator_ : false
+        })
+
+    if (error) console.error(error)
+    else console.log(data)
+
+
     // parsePDFWithChatGPT()
 }
 
@@ -132,7 +143,25 @@ interface ScheduleGroup {
     denominator: ScheduleItem[];
 }
 
-async function parseLessonElement(lessonElement: Element, timeRange: RegExpMatchArray, $: CheerioAPI, dayName: string) {
+
+async function extracted(teacher: string, auditorium: string, currentId: number) {
+    if (teacher != null) {
+        const response = await supabase.rpc('find_teacher', {inicials: teacher.trim()})
+        const {error} = await supabase.from('schedule_teacher_cabinet').insert({
+            schedule_id: currentId,
+            teacher_id: response.data,
+            cabinet_number: auditorium
+        })
+        console.log(error)
+    } else {
+        const {error} = await supabase.from('schedule_teacher_cabinet').insert({
+            schedule_id: currentId,
+            cabinet_number: auditorium
+        })
+    }
+}
+
+async function parseLessonElement(lessonElement: Element, timeRange: RegExpMatchArray, $: CheerioAPI, dayName: string, groupDbId_: number) {
     const lesson = {
         timeStart: timeRange[1],
         timeEnd: timeRange[2],
@@ -146,8 +175,6 @@ async function parseLessonElement(lessonElement: Element, timeRange: RegExpMatch
 
     let pattern = /.*[A-ZА-Я]+ \– ([A-Za-zА-Яа-я0-9ё \"\(\)\-,\.\:\;]{2,})  \– ([А-Яа-я0-9\. ]{2,}), ауд\. ([0-9\-а-я]{2,6}|спортзал)Преподаватель: ([А-Яа-я \.\-]{1,}) - .*/;
 
-    console.log(text)
-
     if (text.includes("Преподаватели")) {
         pattern = /.*[A-ZА-Я]+ \– ([A-Za-zА-Яа-я0-9ё \"\(\)\-,\.\:\;]{2,})  \– ([А-Яа-я0-9\. ]{2,}), ауд\. ([0-9\-а-я]{2,6}|спортзал)Преподаватели: ([А-Яа-я \.\-]{1,}) - .*/;
     } else if (text.includes("спортзал") || !text.includes("Преподаватель")) {
@@ -158,9 +185,9 @@ async function parseLessonElement(lessonElement: Element, timeRange: RegExpMatch
         pattern = /.*[A-ZА-Я]+ \– ([A-Za-zА-Яа-я0-9ё \"\(\)\-,\.\:\;]{2,})  \– ([А-Яа-я0-9\. ]{2,}), ауд\./;
         match = text.match(pattern);
     }
-    let isNumerator: boolean|null = null
+    let isNumerator: boolean | null = null
     const [, subject, location, auditorium, teacher] = match;
-    if (text.includes("▲") || text.includes("▼")){
+    if (text.includes("▲") || text.includes("▼")) {
         isNumerator = text.includes("▲")
     }
 
@@ -169,62 +196,72 @@ async function parseLessonElement(lessonElement: Element, timeRange: RegExpMatch
     let subjectIdForSchedule: number;
     // Если предмета нет в базе, то добавляем
     if (data.length == 0) {
-        await supabase.from('subject').insert({id: subjectId++, subject_name: subject})
-        subjectIdForSchedule = subjectId - 1
+        let response = (await supabase.from('subject').insert({subject_name: subject}).select("id").single())
+        // console.log(response.error)
+        if (response.error) {
+            subjectIdForSchedule = (await supabase.from('subject').select('id').eq('subject_name', subject).single()).data.id
+        } else {
+            subjectIdForSchedule = response.data.id
+        }
+
     } else {
         subjectIdForSchedule = data[0].id
     }
 
-    if (isNumerator == null){
-        await supabase.from('schedule').insert({
-            id: curId++, // Id
-            group_id: groupDbId - 1, // id группы
-            subject_id: subjectIdForSchedule, // id предмета
-            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
-            is_numerator: false, // это числитель?
-            day_id: dayIdFromName(dayName) // день недели
-        })
-        await supabase.from('schedule').insert({
-            id: curId++, // Id
-            group_id: groupDbId - 1, // id группы
-            subject_id: subjectIdForSchedule, // id предмета
-            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
-            is_numerator: true, // это числитель?
-            day_id: dayIdFromName(dayName) // день недели
-        })
-    } else{
-        await supabase.from('schedule').insert({
-            id: curId++, // Id
-            group_id: groupDbId - 1, // id группы
-            subject_id: subjectIdForSchedule, // id предмета
-            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
-            is_numerator: isNumerator, // это числитель?
-            day_id: dayIdFromName(dayName) // день недели
-        })
-    }
     let department_id = 5
     try {
-        let department_id = (await supabase.from("department").select("id").eq("address", location).single()).data.id
-    }catch (e) {
+        department_id = (await supabase.from("department").select("id").eq("address", location).single()).data.id
+    } catch (e) {
 
     }
-
-    console.log(auditorium)
 
     await supabase.from('cabinet').insert({
         cabinet_number: auditorium,
         department_id: department_id,
     })
 
-    // const response = await supabase.rpc('find_teacher', {inicials: teacher.trim()})
+    if (isNumerator == null) {
+        // @ts-ignore
+        let request = (await supabase.from('schedule').insert({
+            group_id: groupDbId_, // id группы
+            subject_id: subjectIdForSchedule, // id предмета
+            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
+            is_numerator: false, // это числитель?
+            day_id: dayIdFromName(dayName) // день недели
+        }).select("id").single())
+        console.log(request.error)
+        let id = request.data.id as number
+        await extracted(teacher, auditorium, id);
 
-    console.log(teacher)
+        id = (await supabase.from('schedule').insert({
+            group_id: groupDbId_, // id группы
+            subject_id: subjectIdForSchedule, // id предмета
+            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
+            is_numerator: true, // это числитель?
+            day_id: dayIdFromName(dayName) // день недели
+        }).select("id").single()).data.id
+        await extracted(teacher, auditorium, id);
+    } else {
+        let request = await supabase.from('schedule').insert({
+            group_id: groupDbId_, // id группы
+            subject_id: subjectIdForSchedule, // id предмета
+            time_str: `${timeRange[0]} - ${timeRange[1]}`, // номер предмета по расписанию
+            is_numerator: isNumerator, // это числитель?
+            day_id: dayIdFromName(dayName) // день недели
+        }).select("id").single()
+        console.log(request.error)
+        let id = request.data.id
+        await extracted(teacher, auditorium, id);
+    }
+
+    //
+
     // console.log(response.data)
     return lesson
 }
 
-function dayIdFromName(name: String){
-    return ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"].indexOf(name.trim())
+function dayIdFromName(name: String) {
+    return ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"].indexOf(name.trim()) + 1
 }
 
 async function parseBigGuap() {
@@ -244,13 +281,14 @@ async function parseBigGuap() {
         if (groupInfo) {
             schedule.group = groupInfo[1]
         }
+        let groupDbId_ = groupDbId
         await
             supabase.from('group').insert({group_id: groupDbId++, group_name: schedule.group})
         console.log(groupInfo)
 
         $('h3').each((_, dayElement) => {
 
-            if ($(dayElement).text().includes("Вне сетки расписания")){
+            if ($(dayElement).text().includes("Вне сетки расписания")) {
                 return;
             }
             const day = {
@@ -266,7 +304,7 @@ async function parseBigGuap() {
                 .each((_, lessonElement) => {
                     const timeRange = $(lessonElement).text().match(/(\d+:\d+)–(\d+:\d+)/);
                     if (timeRange) {
-                        parseLessonElement(lessonElement, timeRange, $, day.name).then(
+                        parseLessonElement(lessonElement, timeRange, $, day.name, groupDbId_).then(
                             (lesson) => day.lessons.push(lesson)
                         )
 
@@ -288,7 +326,7 @@ async function parseBigGuap() {
         //console.log(util.inspect(schedule, {showHidden: false, depth: null, colors: true}))
         // $("#Form1 > div.page > div > div.result > h3:nth-child(7)")
     }
-    while (groupDbId != 528){
+    while (groupDbId <= 527) {
 
     }
 
@@ -443,7 +481,6 @@ async function parseAndAddToTables(schedule: ScheduleItem[], groupDbId: number, 
             for (let i = matched.length - 1; i >= matched.length - (sepCount); i--) {
                 await supabase.from('cabinet').insert({
                     cabinet_number: matched[i],
-                    floor: matched[i].startsWith('сз') ? null : Number(matched[i][0]),
                     info: matched[i].startsWith('сз') ? 'Спортивный зал' : null
                 })
                 cabinets.push(matched[i])
