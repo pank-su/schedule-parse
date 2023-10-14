@@ -18,3 +18,27 @@ BEGIN
 END;
 $$
     LANGUAGE plpgsql;
+
+
+create function get_day_schedule(day_id_ integer, group_id_ integer, is_numerator_ boolean) returns subject_info[]
+    security definer
+    language plpgsql
+as
+$$
+DECLARE
+    subject_i subject_info[];
+BEGIN
+    SELECT array_agg((time_str, (SELECT CAST((subject_id, subject_name) as subject)
+                            FROM subject
+                            WHERE subject.id = schedule.subject_id)::subject,
+                  (SELECT CAST((teacher.id, last_name, first_name, second_name, email, photo) as teacher)
+                   FROM teacher
+                   WHERE teacher.id = stc.teacher_id), cabinet_number)::subject_info) INTO subject_i
+FROM schedule
+         JOIN public.schedule_teacher_cabinet stc on schedule.id = stc.schedule_id
+WHERE group_id = group_id_
+  AND day_id = day_id_
+  AND is_numerator = is_numerator_;
+    RETURN subject_i;
+end;
+$$;
